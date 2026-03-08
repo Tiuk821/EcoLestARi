@@ -2,12 +2,13 @@
 <html>
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Bismillah bisa</title>
   <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.2/dist/mindar-image-aframe.prod.js"></script>
   
   <style>
-    /* Styling untuk UI Skor */
+    body { margin: 0; font-family: Arial, sans-serif; overflow: hidden; }
+    
+    /* UI Papan Skor */
     #score-board {
       position: fixed;
       top: 10px;
@@ -17,71 +18,177 @@
       color: white;
       padding: 10px 20px;
       font-family: Arial, sans-serif;
-      font-size: 24px;
+      font-size: 20px;
       border-radius: 8px;
     }
-    .message {
-      font-size: 14px;
-      color: yellow;
-      display: none;
+
+    /* UI Input Kode (Overlay) */
+    #code-overlay {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: white;
+      padding: 20px;
+      border-radius: 10px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+      z-index: 1000;
+      text-align: center;
+      width: 80%;
+      max-width: 300px;
+    }
+    
+    #code-overlay h3 { margin-top: 0; color: #333; }
+    
+    input[type="text"] {
+      width: 100%;
+      padding: 10px;
+      margin: 10px 0;
+      box-sizing: border-box;
+      border: 2px solid #ddd;
+      border-radius: 5px;
+      font-size: 16px;
+    }
+
+    button {
+      background-color: #007BFF;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 16px;
+      width: 100%;
+    }
+
+    button:hover { background-color: #0056b3; }
+    
+    .status-msg { margin-top: 10px; font-size: 14px; font-weight: bold; }
+    .error { color: red; }
+    .success { color: green; }
+
+    /* Tombol untuk input kode lagi setelah sukses */
+    #re-input-btn {
+      display: none; /* Sembunyi di awal */
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 999;
+      background: #ff9800;
     }
   </style>
 
   <script>
-    // Mendaftarkan komponen logika "distance-check"
-    AFRAME.registerComponent('distance-check', {
+    // --- DATABASE PURA-PURA (SIMULASI BACKEND) ---
+    // Di aplikasi nyata, ini ada di server database Anda
+    const validDatabase = ["AQUA123", "SEGAR001", "MINERAL99", "PROMO2025"];
+    let usedCodes = []; // Menyimpan kode yang sudah dipakai user
+    
+    // Status Global
+    let hasCredit = false; // Apakah user punya izin untuk scan?
+
+    AFRAME.registerComponent('game-logic', {
       schema: {
-        target1: {type: 'selector'}, // ID objek pertama
-        target2: {type: 'selector'}, // ID objek kedua
-        minDistance: {type: 'number', default: 0.5} // Jarak minimal untuk dapat poin (meter)
+        target1: {type: 'selector'},
+        target2: {type: 'selector'},
+        minDistance: {type: 'number', default: 950} // SESUAIKAN DENGAN JARAK KALIBRASI ANDA
       },
 
       init: function() {
         this.score = 0;
-        this.scoreElement = document.querySelector('#score-value');
-        this.msgElement = document.querySelector('#msg');
-        this.lastTimePointsAdded = 0; // Untuk cooldown agar poin tidak bertambah terlalu cepat
+        this.scoreElement = document.querySelector('#score-count');
+        this.msgElement = document.querySelector('#ar-message');
+        this.overlay = document.querySelector('#code-overlay');
         
-        // Helper vector untuk menyimpan posisi dunia (World Position)
+        // Setup Logic
+        this.isScored = false; 
         this.pos1 = new THREE.Vector3();
         this.pos2 = new THREE.Vector3();
+
+        // Binding tombol UI
+        document.querySelector('#submit-code').addEventListener('click', this.verifyCode.bind(this));
+        document.querySelector('#re-input-btn').addEventListener('click', this.showInputUI.bind(this));
+      },
+
+      verifyCode: function() {
+        const inputField = document.querySelector('#unique-code');
+        const statusMsg = document.querySelector('#status-msg');
+        const code = inputField.value.trim().toUpperCase();
+
+        // 1. Cek apakah kode ada di database
+        if (!validDatabase.includes(code)) {
+            statusMsg.innerText = "Kode Salah / Tidak Dikenal!";
+            statusMsg.className = "status-msg error";
+            return;
+        }
+
+        // 2. Cek apakah kode sudah pernah dipakai
+        if (usedCodes.includes(code)) {
+            statusMsg.innerText = "Kode Sudah Terpakai!";
+            statusMsg.className = "status-msg error";
+            return;
+        }
+
+        // 3. Jika Valid
+        usedCodes.push(code); // Tandai sudah dipakai
+        hasCredit = true;     // BERI IZIN SCAN
+        
+        statusMsg.innerText = "Kode Diterima! Silakan dekatkan botol.";
+        statusMsg.className = "status-msg success";
+        
+        // Sembunyikan UI Input setelah 1 detik
+        setTimeout(() => {
+            this.overlay.style.display = 'none';
+            this.msgElement.innerText = "Dekatkan dua botol sekarang!";
+            inputField.value = ""; // Reset input
+            statusMsg.innerText = "";
+        }, 1000);
+      },
+
+      showInputUI: function() {
+          this.overlay.style.display = 'block';
+          document.querySelector('#re-input-btn').style.display = 'none';
+          this.msgElement.innerText = "Menunggu Kode...";
       },
 
       tick: function(time, timeDelta) {
-        // Ambil referensi ke elemen HTML target
+        // Jika tidak punya kredit (belum input kode), hentikan logika jarak
+        if (!hasCredit) return;
+
         const el1 = this.data.target1;
         const el2 = this.data.target2;
 
-        // Pastikan kedua objek sedang terlihat (tracked)
-        if (!el1.object3D.visible || !el2.object3D.visible) {
-            this.msgElement.style.display = 'none';
-            return; 
-        }
+        if (!el1.object3D.visible || !el2.object3D.visible) return;
 
-        // Dapatkan posisi absolut (World Position) dari kedua objek
         el1.object3D.getWorldPosition(this.pos1);
         el2.object3D.getWorldPosition(this.pos2);
-
-        // Hitung jarak (Euclidean Distance)
         const distance = this.pos1.distanceTo(this.pos2);
 
-        // Logika Poin
+        // LOGIKA SKOR
         if (distance < this.data.minDistance) {
-            // Tampilkan pesan
-            this.msgElement.style.display = 'block';
-            this.msgElement.innerText = "Dekat! Menambahkan Poin...";
-
-            // Tambahkan poin setiap 1 detik (1000ms) agar tidak spam
-            if (time - this.lastTimePointsAdded > 1000) {
-                this.score += 10;
+            if (!this.isScored) {
+                // Tambah Skor
+                this.score += 1;
                 this.scoreElement.innerText = this.score;
-                this.lastTimePointsAdded = time;
                 
-                // Efek visual sederhana (opsional): Skala membesar sebentar
-                el1.setAttribute('animation', 'property: scale; to: 1.2 1.2 1.2; dur: 200; easing: easeInOutQuad; dir: alternate; loop: 2');
+                // Efek & Pesan
+                this.msgElement.innerText = "Sukses! Poin +1 Ditambahkan.";
+                el1.setAttribute('animation', 'property: scale; to: 1.3 1.3 1.3; dur: 200; dir: alternate; loop: 2');
+                
+                // KUNCI DAN RESET
+                this.isScored = true; 
+                hasCredit = false; // HANGUSKAN KREDIT (Harus input kode lagi)
+
+                // Tampilkan tombol untuk input kode lagi
+                setTimeout(() => {
+                    document.querySelector('#re-input-btn').style.display = 'block';
+                    this.msgElement.innerText = "Masukkan kode baru untuk poin berikutnya.";
+                }, 2000);
             }
         } else {
-            this.msgElement.style.display = 'none';
+            // Reset logika "sekali sentuh" jika dijauhkan (tapi credit tetap hangus jika sudah kena)
+            this.isScored = false; 
         }
       }
     });
@@ -90,26 +197,34 @@
 <body>
 
   <div id="score-board">
-    Skor: <span id="score-value">0</span>
-    <div id="msg" class="message"></div>
+    Skor Anda: <span id="score-count">0</span>
+    <div id="ar-message" style="font-size: 14px; color: yellow; margin-top:5px;">Menunggu Kode...</div>
   </div>
 
-  <a-scene mindar-image="imageTargetSrc: ./targets.mind; maxTrack: 2" color-space="sRGB" renderer="colorManagement: true, physicallyCorrectLights" vr-mode-ui="enabled: false" device-orientation-permission-ui="enabled: false">
+  <div id="code-overlay">
+    <h3>Klaim Poin</h3>
+    <p style="font-size: 12px; color: #666;">Temukan kode di tutup botol</p>
+    <input type="text" id="unique-code" placeholder="Masukkan Kode (cth: AQUA123)">
+    <div id="status-msg" class="status-msg"></div>
+    <button id="submit-code">Kirim Kode</button>
+  </div>
+
+  <button id="re-input-btn">Masukkan Kode Lain</button>
+
+  <a-scene mindar-image="imageTargetSrc: ./targets_fix.mind; maxTrack: 2" color-space="sRGB" renderer="colorManagement: true, physicallyCorrectLights" vr-mode-ui="enabled: false" device-orientation-permission-ui="enabled: false">
     
     <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
 
     <a-entity id="target-one" mindar-image-target="targetIndex: 0">
-      <a-box color="red" position="0 0 0" scale="0.5 0.5 0.5"></a-box>
+      <a-box color="red" scale="0.5 0.5 0.5"></a-box>
     </a-entity>
 
     <a-entity id="target-two" mindar-image-target="targetIndex: 1">
-       <a-sphere color="blue" position="0 0 0" scale="0.5 0.5 0.5"></a-sphere>
+       <a-sphere color="blue" scale="0.5 0.5 0.5"></a-sphere>
     </a-entity>
 
-    <a-entity distance-check="target1: #target-one; target2: #target-two; minDistance: 2.0"></a-entity>
+    <a-entity game-logic="target1: #target-one; target2: #target-two; minDistance: 950"></a-entity>
 
   </a-scene>
 </body>
-
 </html>
-
